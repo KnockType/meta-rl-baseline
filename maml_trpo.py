@@ -2,10 +2,12 @@ import random
 import torch
 import gymnasium as gym
 import numpy as np
-from gym.async_vec_env import AsyncVectorEnv
+from custom_gym.async_vec_env import AsyncVectorEnv
 from ch.envs import ActionSpaceScaler
+import custom_gym
 
-def main(env_name = 'HalfCheetah-v5', seed = 42, num_workers = 10, cuda = 0):
+
+def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, cuda = 0):
     cuda = bool(cuda)
     random.seed(seed)
     np.random.seed(seed)
@@ -23,5 +25,6 @@ def main(env_name = 'HalfCheetah-v5', seed = 42, num_workers = 10, cuda = 0):
 
     env = AsyncVectorEnv([make_env for _ in range(num_workers)])
     env.reset(seed)
+    env.set_task(env.sample_tasks(1)[0])
 if __name__ == '__main__':
     main()
