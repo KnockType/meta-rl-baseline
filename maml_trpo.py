@@ -103,8 +103,18 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
             # Fast Adapt
             for step in range(adapt_steps):
                 train_episodes = task.run(clone, episodes=adapt_bsz)
+                if cuda:
+                    train_episodes = train_episodes.to(device, non_blocking=True)
                 clone = fast_adapt_a2c(clone, train_episodes, adapt_lr,
                                     baseline, gamma, tau, first_order=True)
+                task_replay.append(train_episodes)
+
+            # Compute Validation Loss
+            valid_episodes = task.run(clone, episodes=adapt_bsz)
+            task_replay.append(valid_episodes)
+            iteration_reward += valid_episodes.reward().sum().item() / adapt_bsz
+            iteration_replays.append(task_replay)
+            iteration_policies.append(clone)
 
 if __name__ == '__main__':
     main()
