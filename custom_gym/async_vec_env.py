@@ -38,7 +38,7 @@ class AsyncVectorEnv(SubprocVecEnv):
 
     def step(self, actions):
         obs, rews, terminateds, truncateds, task_ids, infos = super(AsyncVectorEnv, self).step(actions)
-        return obs, rews, terminateds, truncateds, task_ids, infos
+        return obs, rews, terminateds, truncateds, infos
 
     def reset(self, seed=None):
         for i in range(self.num_envs):

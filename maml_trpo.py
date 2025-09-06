@@ -13,7 +13,7 @@ from ch.runner_wrapper import Runner
 import custom_gym
 
 
-def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, cuda = 0):
+def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, adapt_steps = 1, adapt_bsz = 10, cuda = 0):
     cuda = bool(cuda)
     random.seed(seed)
     np.random.seed(seed)
@@ -50,6 +50,10 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
             env.reset()
             task = Runner(env)
             task_replay = []
+
+            # Fast Adapt
+            for step in range(adapt_steps):
+                train_episodes = task.run(clone, episodes=adapt_bsz)
         
 if __name__ == '__main__':
     main()

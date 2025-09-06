@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import torch
+import numpy as np
 from ch._utils import _min_size, _istensorable
 from .env.utils import is_vectorized
 from .base_wrapper import Wrapper
@@ -86,7 +87,7 @@ class Runner(Wrapper):
         self._current_state = None
 
     def reset(self, *args, **kwargs):
-        self._current_state = self.env.reset(*args, **kwargs)
+        self._current_state, _ = self.env.reset(*args, **kwargs)
         self._needs_reset = False
         return self._current_state
 
@@ -163,7 +164,7 @@ class Runner(Wrapper):
                 collected_episodes += 1
                 self._needs_reset = True
             elif self.is_vectorized:
-                collected_episodes += sum(torch.logical_or(terminated, truncated))
+                collected_episodes += sum(np.logical_or(terminated, truncated))
             replay.append(old_state, action, reward, state, terminated, truncated, **info)
             self._current_state = state
             if render:
