@@ -2,9 +2,12 @@ import random
 import torch
 import gymnasium as gym
 import numpy as np
+import algorithms.trpo as trpo
 from tqdm import tqdm
 from copy import deepcopy
 from torch import autograd
+from torch.distributions.kl import kl_divergence
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from custom_gym.async_vec_env import AsyncVectorEnv
 from ch.envs import ActionSpaceScaler
 from ch.torch_wrapper import Torch
@@ -14,8 +17,10 @@ from ch.runner_wrapper import Runner
 from ch._torch import normalize
 from ch.td import discount
 from ch.pg import generalized_advantage
-from ch.algorithms.a2c import policy_loss
+from ch.algorithms.a2c import policy_loss as a2c_policy_loss
+from algorithms.trpo import policy_loss as trpo_policy_loss
 from algorithms.maml import maml_update
+from utils import clone_module
 import custom_gym
 
 def compute_advantages(baseline, tau, gamma, rewards, terminated, truncated, states, next_states):
@@ -47,7 +52,7 @@ def maml_a2c_loss(train_episodes, learner, baseline, gamma, tau):
     advantages = compute_advantages(baseline, tau, gamma, rewards,
                                     terminated, truncated, states, next_states)
     advantages = normalize(advantages).detach()
-    return policy_loss(log_probs, advantages)
+    return a2c_policy_loss(log_probs, advantages)
 
 
 def fast_adapt_a2c(clone, train_episodes, adapt_lr, baseline, gamma, tau, first_order=False):
@@ -59,10 +64,49 @@ def fast_adapt_a2c(clone, train_episodes, adapt_lr, baseline, gamma, tau, first_
                               create_graph=second_order)
     return maml_update(clone, adapt_lr, gradients)
 
+def meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline, tau, gamma, adapt_lr):
+    mean_loss = 0.0
+    mean_kl = 0.0
+    for task_replays, old_policy in tqdm(zip(iteration_replays, iteration_policies),
+                                         total=len(iteration_replays),
+                                         desc='Surrogate Loss',
+                                         leave=False):
+        train_replays = task_replays[:-1]
+        valid_episodes = task_replays[-1]
+        new_policy = clone_module(policy)
+
+        # Fast Adapt
+        for train_episodes in train_replays:
+            new_policy = fast_adapt_a2c(new_policy, train_episodes, adapt_lr,
+                                        baseline, gamma, tau, first_order=False)
+
+        # Useful values
+        states = valid_episodes.state()
+        actions = valid_episodes.action()
+        next_states = valid_episodes.next_state()
+        rewards = valid_episodes.reward()
+        terminated = valid_episodes.terminated()
+        truncated = valid_episodes.truncated()
+
+        # Compute KL
+        old_densities = old_policy.density(states)
+        new_densities = new_policy.density(states)
+        kl = kl_divergence(new_densities, old_densities).mean()
+        mean_kl += kl
+
+        # Compute Surrogate Loss
+        advantages = compute_advantages(baseline, tau, gamma, rewards, terminated, truncated, states, next_states)
+        advantages = normalize(advantages).detach()
+        old_log_probs = old_densities.log_prob(actions).mean(dim=1, keepdim=True).detach()
+        new_log_probs = new_densities.log_prob(actions).mean(dim=1, keepdim=True)
+        mean_loss += trpo_policy_loss(new_log_probs, old_log_probs, advantages)
+    mean_kl /= len(iteration_replays)
+    mean_loss /= len(iteration_replays)
+    return mean_loss, mean_kl
 
 
 def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, adapt_steps = 1, adapt_bsz = 10,
-         adapt_lr= 0.05, gamma=0.99, tau=0.95, cuda = 0):
+         adapt_lr= 0.05, gamma=0.99, tau=0.95, meta_lr=0.5, cuda = 0):
     cuda = bool(cuda)
     random.seed(seed)
     np.random.seed(seed)
@@ -115,6 +159,53 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
             iteration_reward += valid_episodes.reward().sum().item() / adapt_bsz
             iteration_replays.append(task_replay)
             iteration_policies.append(clone)
+        
+        # Print statistics
+        print('\nIteration', iteration)
+        adaptation_reward = iteration_reward / meta_bsz
+        print('adaptation_reward', adaptation_reward)
+
+        all_rewards.append(adaptation_reward)
+
+        # TRPO meta-optimization
+        backtrack_factor = 0.5
+        ls_max_steps = 15
+        max_kl = 0.01
+        if cuda:
+            policy = policy.to(device, non_blocking=True)
+            baseline = baseline.to(device, non_blocking=True)
+            iteration_replays = [[r.to(device, non_blocking=True) for r in task_replays] for task_replays in
+                                iteration_replays]
+
+
+        # Compute CG step direction
+        old_loss, old_kl = meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline, tau, gamma, adapt_lr)
+        grad = autograd.grad(old_loss,
+                            policy.parameters(),
+                            retain_graph=True)
+        grad = parameters_to_vector([g.detach() for g in grad])
+        Fvp = trpo.hessian_vector_product(old_kl, policy.parameters())
+        step = trpo.conjugate_gradient(Fvp, grad)
+        shs = 0.5 * torch.dot(step, Fvp(step))
+        lagrange_multiplier = torch.sqrt(shs / max_kl)
+        step = step / lagrange_multiplier
+        step_ = [torch.zeros_like(p.data) for p in policy.parameters()]
+        vector_to_parameters(step, step_)
+        step = step_
+        del old_kl, Fvp, grad
+        old_loss.detach_()
+
+        # Line-search
+        for ls_step in range(ls_max_steps):
+            stepsize = backtrack_factor ** ls_step * meta_lr
+            clone = deepcopy(policy)
+            for p, u in zip(clone.parameters(), step):
+                p.data.add_(u.data, alpha=-stepsize)
+            new_loss, kl = meta_surrogate_loss(iteration_replays, iteration_policies, clone, baseline, tau, gamma, adapt_lr)
+            if new_loss < old_loss and kl < max_kl:
+                for p, u in zip(policy.parameters(), step):
+                    p.data.add_(u.data, alpha=-stepsize)
+                break
 
 if __name__ == '__main__':
     main()
