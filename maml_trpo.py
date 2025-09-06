@@ -4,16 +4,65 @@ import gymnasium as gym
 import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
+from torch import autograd
 from custom_gym.async_vec_env import AsyncVectorEnv
 from ch.envs import ActionSpaceScaler
 from ch.torch_wrapper import Torch
 from policies import DiagNormalPolicy
 from ch.models.robotics import LinearValue
 from ch.runner_wrapper import Runner
+from ch._torch import normalize
+from ch.td import discount
+from ch.pg import generalized_advantage
+from ch.algorithms.a2c import policy_loss
+from algorithms.maml import maml_update
 import custom_gym
 
+def compute_advantages(baseline, tau, gamma, rewards, terminated, truncated, states, next_states):
+    # Update baseline
+    dones = torch.logical_or(terminated, truncated)
+    returns = discount(gamma, rewards, dones)
+    baseline.fit(states, returns)
+    values = baseline(states)
+    next_values = baseline(next_states)
+    bootstraps = values * (~dones) + next_values * dones
+    next_value = torch.zeros(1, device=values.device)
+    return generalized_advantage(tau=tau,
+                                gamma=gamma,
+                                rewards=rewards,
+                                dones=dones,
+                                values=bootstraps,
+                                next_value=next_value)
 
-def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, adapt_steps = 1, adapt_bsz = 10, cuda = 0):
+
+def maml_a2c_loss(train_episodes, learner, baseline, gamma, tau):
+    # Update policy and baseline
+    states = train_episodes.state()
+    actions = train_episodes.action()
+    rewards = train_episodes.reward()
+    terminated = train_episodes.terminated()
+    truncated = train_episodes.truncated()
+    next_states = train_episodes.next_state()
+    log_probs = learner.log_prob(states, actions)
+    advantages = compute_advantages(baseline, tau, gamma, rewards,
+                                    terminated, truncated, states, next_states)
+    advantages = normalize(advantages).detach()
+    return policy_loss(log_probs, advantages)
+
+
+def fast_adapt_a2c(clone, train_episodes, adapt_lr, baseline, gamma, tau, first_order=False):
+    second_order = not first_order
+    loss = maml_a2c_loss(train_episodes, clone, baseline, gamma, tau)
+    gradients = autograd.grad(loss,
+                              clone.parameters(),
+                              retain_graph=second_order,
+                              create_graph=second_order)
+    return maml_update(clone, adapt_lr, gradients)
+
+
+
+def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, adapt_steps = 1, adapt_bsz = 10,
+         adapt_lr= 0.05, gamma=0.99, tau=0.95, cuda = 0):
     cuda = bool(cuda)
     random.seed(seed)
     np.random.seed(seed)
@@ -54,6 +103,8 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
             # Fast Adapt
             for step in range(adapt_steps):
                 train_episodes = task.run(clone, episodes=adapt_bsz)
-        
+                clone = fast_adapt_a2c(clone, train_episodes, adapt_lr,
+                                    baseline, gamma, tau, first_order=True)
+
 if __name__ == '__main__':
     main()
