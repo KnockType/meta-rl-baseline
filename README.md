@@ -2,6 +2,17 @@
 
 This repository provides a baseline for meta-reinforcement learning algorithms, modernized to be compatible with the latest versions of standard reinforcement learning libraries. It is designed to be a starting point for researchers and practitioners looking to experiment with meta-RL techniques using up-to-date tools.
 
+### Algorithms
+*   **MAML-TRPO:** 
+
+### Environments
+*   **MuJoCo:** `HalfCheetahForwardBackward-v5`
+*   **Meta-World ML1:**
+
+### Future Work (To-Do)
+*   Implement the **RL²** algorithm.
+*   Expand support for more `mujoco` and `metaworld` environments.
+
 ## Credits
 
 This codebase is heavily based on the [learn2learn](https://github.com/learnables/learn2learn/) library. The original structure and algorithms were adapted from their repository.
@@ -9,8 +20,6 @@ This codebase is heavily based on the [learn2learn](https://github.com/learnable
 The primary purpose of this repository is to update the dependencies and ensure compatibility with the current Python and RL ecosystem.
 
 ## Key Updates & Modernization
-
-The core motivation behind this repository is to migrate from older, now-deprecated libraries to their modern successors. This makes the code easier to install, run, and maintain on current systems.
 
 The key migrations include:
 *   **Environment API:** Migrated from `gym==0.23.0` to `gymnasium==1.2.0`. Gymnasium is the official and maintained fork of OpenAI's Gym library.
@@ -20,7 +29,7 @@ The key migrations include:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/meta-rl-baseline.git
+    git clone https://github.com/KnockType/meta-rl-baseline.git
     cd meta-rl-baseline
     ```
 
@@ -43,12 +52,6 @@ To run a training script, execute the main Python file. For example, to run the 
 python maml_trpo.py
 ```
 You can modify the parameters and configurations within the script to suit your experiments.
-
-## Project Goals
-
-*   To provide a stable, modern baseline for meta-RL research.
-*   To simplify the setup process by using up-to-date and well-supported libraries.
-*   To serve as an educational resource for those learning about meta-reinforcement learning with modern tools.
 
 ## Contributing
 
