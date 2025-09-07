@@ -1,23 +1,24 @@
 # Meta-RL Baseline
 
-This repository provides a baseline for meta-reinforcement learning algorithms, modernized to be compatible with the latest versions of standard reinforcement learning libraries. It is designed to be a starting point for researchers and practitioners looking to experiment with meta-RL techniques using up-to-date tools.
+This repository provides a baseline for meta-reinforcement learning algorithms, modernized to be compatible with the latest versions of standard reinforcement learning libraries.
 
 ### Algorithms
-*   **MAML-TRPO:** 
+*   **MAML-TRPO** 
 
 ### Environments
 *   **MuJoCo:** `HalfCheetahForwardBackward-v5`
-*   **Meta-World ML1:**
+*   **Meta-World ML1**
 
 ### Future Work (To-Do)
-*   Implement the **RL²** algorithm.
+*   Implement the **RL<sup>2</sup>** algorithm.
 *   Expand support for more `mujoco` and `metaworld` environments.
+*   Add custom environments.
 
 ## Credits
 
 This codebase is heavily based on the [learn2learn](https://github.com/learnables/learn2learn/) library. The original structure and algorithms were adapted from their repository.
 
-The primary purpose of this repository is to update the dependencies and ensure compatibility with the current Python and RL ecosystem.
+The primary purpose of this repository is to update the dependencies and ensure compatibility with the current Python and RL ecosystema and add new algorithms and environments.
 
 ## Key Updates & Modernization
 
@@ -51,8 +52,3 @@ To run a training script, execute the main Python file. For example, to run the 
 ```bash
 python maml_trpo.py
 ```
-You can modify the parameters and configurations within the script to suit your experiments.
-
-## Contributing
-
-Contributions are welcome! If you find a bug or have an idea for an improvement, please open an issue or submit a pull request.

@@ -1,5 +1,8 @@
 import random
 import torch
+import wandb
+import yaml
+import multiprocessing
 import gymnasium as gym
 import numpy as np
 import algorithms.trpo as trpo
@@ -78,7 +81,7 @@ def meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline,
         # Fast Adapt
         for train_episodes in train_replays:
             new_policy = fast_adapt_a2c(new_policy, train_episodes, adapt_lr,
-                                        baseline, gamma, tau, first_order=False)
+                                        baseline, gamma, tau, first_order=True)
 
         # Useful values
         states = valid_episodes.state()
@@ -105,25 +108,26 @@ def meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline,
     return mean_loss, mean_kl
 
 
-def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10, num_iterations = 5, meta_bsz = 3, adapt_steps = 1, adapt_bsz = 10,
-         adapt_lr= 0.05, gamma=0.99, tau=0.95, meta_lr=0.5, cuda = 0):
-    cuda = bool(cuda)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def main(gpu_id):
+    wandb.init()
+    config = wandb.config
+    cuda = bool(config.cuda)
+    random.seed(config.seed)
+    np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
     device_name = 'cpu'
     if cuda:
-        torch.cuda.manual_seed(seed)
-        device_name = f'cuda:{5}'
+        torch.cuda.manual_seed(config.seed)
+        device_name = f'cuda:{gpu_id}'
     device = torch.device(device_name)
 
     def make_env():
-        env = gym.make(env_name)
+        env = gym.make(config.env_name)
         env = ActionSpaceScaler(env)
         return env
 
-    env = AsyncVectorEnv([make_env for _ in range(num_workers)])
-    env.reset(seed)
+    env = AsyncVectorEnv([make_env for _ in range(config.num_workers)])
+    env.reset(config.seed)
     env.set_task(env.sample_tasks(1)[0])
     env = Torch(env)
     policy = DiagNormalPolicy(env.state_size, env.action_size, device=device)
@@ -132,12 +136,12 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
     baseline = LinearValue(env.state_size, env.action_size)
     all_rewards = []
 
-    for iteration in range(num_iterations):
+    for iteration in range(config.num_iterations):
         iteration_reward = 0.0
         iteration_replays = []
         iteration_policies = []
 
-        for task_config in tqdm(env.sample_tasks(meta_bsz), leave=False, desc='Data'):  # Samples a new config
+        for task_config in tqdm(env.sample_tasks(config.meta_bsz), leave=False, desc='Data'):  # Samples a new config
             clone = deepcopy(policy)
             env.set_task(task_config)
             env.reset()
@@ -145,27 +149,28 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
             task_replay = []
 
             # Fast Adapt
-            for step in range(adapt_steps):
-                train_episodes = task.run(clone, episodes=adapt_bsz)
+            for step in range(config.adapt_steps):
+                train_episodes = task.run(clone, episodes=config.adapt_bsz)
                 if cuda:
                     train_episodes = train_episodes.to(device, non_blocking=True)
-                clone = fast_adapt_a2c(clone, train_episodes, adapt_lr,
-                                    baseline, gamma, tau, first_order=True)
+                clone = fast_adapt_a2c(clone, train_episodes, config.adapt_lr,
+                                    baseline, config.gamma, config.tau, first_order=True)
                 task_replay.append(train_episodes)
 
             # Compute Validation Loss
-            valid_episodes = task.run(clone, episodes=adapt_bsz)
+            valid_episodes = task.run(clone, episodes=config.adapt_bsz)
             task_replay.append(valid_episodes)
-            iteration_reward += valid_episodes.reward().sum().item() / adapt_bsz
+            iteration_reward += valid_episodes.reward().sum().item() / config.adapt_bsz
             iteration_replays.append(task_replay)
             iteration_policies.append(clone)
         
         # Print statistics
         print('\nIteration', iteration)
-        adaptation_reward = iteration_reward / meta_bsz
+        adaptation_reward = iteration_reward / config.meta_bsz
         print('adaptation_reward', adaptation_reward)
 
         all_rewards.append(adaptation_reward)
+        wandb.log({"adaptation_reward": adaptation_reward}) 
 
         # TRPO meta-optimization
         backtrack_factor = 0.5
@@ -179,7 +184,7 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
 
 
         # Compute CG step direction
-        old_loss, old_kl = meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline, tau, gamma, adapt_lr)
+        old_loss, old_kl = meta_surrogate_loss(iteration_replays, iteration_policies, policy, baseline, config.tau, config.gamma, config.adapt_lr)
         grad = autograd.grad(old_loss,
                             policy.parameters(),
                             retain_graph=True)
@@ -197,15 +202,29 @@ def main(env_name = 'HalfCheetahForwardBackward-v5', seed = 42, num_workers = 10
 
         # Line-search
         for ls_step in range(ls_max_steps):
-            stepsize = backtrack_factor ** ls_step * meta_lr
+            stepsize = backtrack_factor ** ls_step * config.meta_lr
             clone = deepcopy(policy)
             for p, u in zip(clone.parameters(), step):
                 p.data.add_(u.data, alpha=-stepsize)
-            new_loss, kl = meta_surrogate_loss(iteration_replays, iteration_policies, clone, baseline, tau, gamma, adapt_lr)
+            new_loss, kl = meta_surrogate_loss(iteration_replays, iteration_policies, clone, baseline, config.tau, config.gamma, config.adapt_lr)
             if new_loss < old_loss and kl < max_kl:
                 for p, u in zip(policy.parameters(), step):
                     p.data.add_(u.data, alpha=-stepsize)
                 break
+    wandb.finish()
 
-if __name__ == '__main__':
-    main()
+def run_agent(sweep_id, count, gpu_id):
+    wandb.agent(sweep_id, function=lambda: main(gpu_id), count=count)
+
+with open("sweep.yaml") as file:
+    sweep_config = yaml.safe_load(file)
+    sweep_id = wandb.sweep(sweep=sweep_config, project="maml-trpo-new")
+    NUM_AGENTS = 3
+    COUNT = 5
+    processes = []
+    for i in range(NUM_AGENTS):
+        p = multiprocessing.Process(target=run_agent, args=(sweep_id, COUNT, 3))
+        processes.append(p)
+        p.start()
+    for p in processes:
+        p.join()
