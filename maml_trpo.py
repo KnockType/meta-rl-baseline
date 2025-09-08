@@ -218,7 +218,7 @@ def run_agent(sweep_id, count, gpu_id):
 
 with open("sweep.yaml") as file:
     sweep_config = yaml.safe_load(file)
-    sweep_id = wandb.sweep(sweep=sweep_config, project="maml-trpo-new")
+    sweep_id = wandb.sweep(sweep=sweep_config, project="maml-trpo")
     NUM_AGENTS = 3
     COUNT = 5
     processes = []

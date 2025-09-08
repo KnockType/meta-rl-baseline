@@ -30,7 +30,7 @@ class EnvWorker(mp.Process):
             command, data = self.remote.recv()
             if command == 'step':
                 observation, reward, terminated, truncated, info = self.env.step(data)
-                if (terminated or truncated) and (not (self.terminated or truncated)):
+                if (terminated or truncated) and (not (self.terminated or self.truncated)):
                     observation, info = self.try_reset()
                 self.remote.send((observation, reward, terminated, truncated, self.task_id, info))
             elif command == 'reset':
