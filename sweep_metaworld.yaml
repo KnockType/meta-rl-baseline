@@ -44,4 +44,4 @@ parameters:
   num_workers:
     value: 10
   cuda:
-    value: False
+    value: True
