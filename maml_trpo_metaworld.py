@@ -35,7 +35,7 @@ def compute_advantages(baseline, tau, gamma, rewards, terminated, truncated, sta
     baseline.fit(states, returns)
     values = baseline(states)
     next_values = baseline(next_states)
-    bootstraps = values * (~dones) + next_values * dones
+    bootstraps = values * torch.logical_not(dones) + next_values * dones
     next_value = torch.zeros(1, device=values.device)
     return generalized_advantage(tau=tau,
                                 gamma=gamma,

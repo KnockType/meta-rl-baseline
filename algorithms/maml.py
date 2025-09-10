@@ -36,5 +36,5 @@ def maml_update(model, lr, grads=None):
             print(msg)
         for p, g in zip(params, grads):
             if g is not None:
-                p.update = - lr * g
+                p.data += - lr * g
     return update_module(model)

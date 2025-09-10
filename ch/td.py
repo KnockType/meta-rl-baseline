@@ -61,7 +61,7 @@ def discount(gamma, rewards, dones, bootstrap=0.0):
     discounted = th.zeros_like(rewards)
     length = discounted.size(0)
     for t in reversed(range(length)):
-        R = R * (~dones[t])
+        R = R * th.logical_not(dones[t])
         R = rewards[t] + gamma * R
         discounted[t] += R[0]
     return discounted
@@ -106,5 +106,5 @@ def temporal_difference(gamma, rewards, dones, values, next_values):
     rewards = _reshape_helper(rewards).reshape_as(values)
     dones = _reshape_helper(dones).reshape_as(values)
 
-    not_dones = ~dones
+    not_dones = th.logical_not(dones)
     return rewards + gamma * not_dones * next_values - values
